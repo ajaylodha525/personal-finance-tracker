@@ -4,7 +4,16 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Finance Tracker</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F6E56">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@500&display=swap" rel="stylesheet"/>
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/service-worker.js')
+      .then(() => console.log('PWA Ready!'))
+      .catch(err => console.log('Error:', err));
+  }
+</script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'DM Sans',sans-serif;background:#F7F5F0;color:#1A1714;min-height:100vh;padding-bottom:3rem}
@@ -49,14 +58,14 @@ input:focus,select:focus{border-color:#1A1714}
 .month-title{font-size:12px;font-weight:600;color:#6B6560;text-transform:uppercase;letter-spacing:.5px;padding:.5rem 0 6px;border-bottom:1px solid #E2DDD5;margin-bottom:6px;display:flex;justify-content:space-between}
 .tx{display:flex;align-items:center;gap:10px;padding:10px 12px;background:#fff;border:1.5px solid #E2DDD5;border-radius:10px}
 .tx-icon{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
-.tx-icon.inc{background:#E1F5EE}
-.tx-icon.exp{background:#FAECE7}
+.tx-icon.income{background:#E1F5EE}
+.tx-icon.expense{background:#FAECE7}
 .tx-info{flex:1;min-width:0}
 .tx-cat{font-size:14px;font-weight:500}
 .tx-meta{font-size:12px;color:#9E9890;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tx-amt{font-family:'DM Mono',monospace;font-size:14px;font-weight:500}
-.tx-amt.inc{color:#0F6E56}
-.tx-amt.exp{color:#993C1D}
+.tx-amt.income{color:#0F6E56}
+.tx-amt.expense{color:#993C1D}
 .del{background:none;border:none;cursor:pointer;color:#9E9890;font-size:18px;padding:4px}
 .del:hover{color:#993C1D}
 
@@ -136,12 +145,19 @@ input:focus,select:focus{border-color:#1A1714}
 <div class="toast" id="toast"></div>
 
 <script>
-const API = "http://localhost:5000";
 const ECATS = ["Food","Rent","Transport","Shopping","Entertainment","Health","Education","Other"];
 const ICATS = ["Salary","Freelance","Business","Gift","Other"];
 const EMOJI = {Food:"🍽️",Rent:"🏠",Transport:"🚗",Shopping:"🛍️",Entertainment:"🎬",Health:"❤️",Education:"📚",Salary:"💼",Freelance:"💻",Business:"🏪",Gift:"🎁",Other:"📌"};
 
 let txType = "income";
+
+// ✅ localStorage se data lena aur save karna
+function getTxs() {
+  return JSON.parse(localStorage.getItem("finance_txs") || "[]");
+}
+function saveTxs(txs) {
+  localStorage.setItem("finance_txs", JSON.stringify(txs));
+}
 
 function fmt(n){ return "₹"+Math.abs(n).toLocaleString("en-IN",{maximumFractionDigits:0}); }
 
@@ -170,45 +186,44 @@ function tab(name){
   if(name==="summary") loadSummary();
 }
 
-async function getStats(){
-  try{
-    const txs=await fetch(API+"/transactions").then(r=>r.json());
-    const inc=txs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
-    const exp=txs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
-    const bal=inc-exp;
-    document.getElementById("inc").textContent=fmt(inc);
-    document.getElementById("exp").textContent=fmt(exp);
-    const b=document.getElementById("bal");
-    b.textContent=(bal>=0?"+":"-")+fmt(bal);
-    b.className="card-amount "+(bal>=0?"green":"red");
-  }catch(e){
-    document.getElementById("bal").textContent="Server off?";
-  }
+function getStats(){
+  const txs = getTxs();
+  const inc = txs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
+  const exp = txs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
+  const bal = inc - exp;
+  document.getElementById("inc").textContent=fmt(inc);
+  document.getElementById("exp").textContent=fmt(exp);
+  const b=document.getElementById("bal");
+  b.textContent=(bal>=0?"+":"-")+fmt(bal);
+  b.className="card-amount "+(bal>=0?"green":"red");
 }
 
-async function addTx(){
+function addTx(){
   const amt=parseFloat(document.getElementById("f-amt").value);
   if(!amt||amt<=0){toast("⚠️ Amount daalo!");return;}
-  const body={
-    type:txType,
-    category:document.getElementById("f-cat").value,
-    amount:amt,
-    date:document.getElementById("f-date").value||new Date().toISOString().split("T")[0],
-    note:document.getElementById("f-note").value
+  const tx = {
+    id: Date.now().toString(),
+    type: txType,
+    category: document.getElementById("f-cat").value,
+    amount: amt,
+    date: document.getElementById("f-date").value||new Date().toISOString().split("T")[0],
+    note: document.getElementById("f-note").value
   };
-  await fetch(API+"/transactions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  const txs = getTxs();
+  txs.push(tx);
+  saveTxs(txs);
   document.getElementById("f-amt").value="";
   document.getElementById("f-note").value="";
   getStats();
   toast("✅ "+(txType==="income"?"Income":"Expense")+" save ho gaya!");
 }
 
-async function loadHistory(){
+function loadHistory(){
   const list=document.getElementById("tx-list");
-  const txs=await fetch(API+"/transactions").then(r=>r.json());
+  const txs=getTxs();
   if(!txs.length){list.innerHTML='<div class="empty">Koi transaction nahi hai abhi tak 👆</div>';return;}
   const byMonth={};
-  txs.reverse().forEach(t=>{
+  [...txs].reverse().forEach(t=>{
     const key=new Date(t.date).toLocaleString("en-IN",{month:"long",year:"numeric"});
     if(!byMonth[key])byMonth[key]=[];
     byMonth[key].push(t);
@@ -230,17 +245,17 @@ async function loadHistory(){
   }).join("");
 }
 
-async function delTx(id){
+function delTx(id){
   if(!confirm("Delete karein?"))return;
-  await fetch(API+"/transactions/"+id,{method:"DELETE"});
+  const txs=getTxs().filter(t=>t.id!==id);
+  saveTxs(txs);
   getStats(); loadHistory();
   toast("🗑️ Delete ho gaya!");
 }
 
-async function loadSummary(){
-  const txs=await fetch(API+"/transactions").then(r=>r.json());
+function loadSummary(){
+  const txs=getTxs();
 
-  // Category bars
   const catEl=document.getElementById("cat-bars");
   const exp=txs.filter(t=>t.type==="expense");
   if(!exp.length){catEl.innerHTML='<div class="empty">Koi expense nahi hai.</div>';}
@@ -255,7 +270,6 @@ async function loadSummary(){
       </div>`).join("");
   }
 
-  // Monthly bars
   const mEl=document.getElementById("month-bars");
   if(!txs.length){mEl.innerHTML='<div class="empty">Koi data nahi hai.</div>';return;}
   const byM={};
